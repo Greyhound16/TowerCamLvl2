@@ -10,50 +10,36 @@
 
 <video id="video" autoplay playsinline width="100%"></video>
 
-<button onclick="enableSensors()">ENABLE SENSORS</button>
-<button onclick="confirm()">CONFIRM POINTING</button>
+<button id="enableBtn">ENABLE SENSORS</button>
+<button id="confirmBtn">CONFIRM POINTING</button>
+
+<p id="status">Compass not ready</p>
 
 <script>
 let heading = null;
+let sensorEnabled = false;
 
+// Enable camera and device orientation
 async function enableSensors() {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "environment" }
-  });
-  document.getElementById("video").srcObject = stream;
-
-  if (typeof DeviceOrientationEvent?.requestPermission === "function") {
-    const permission = await DeviceOrientationEvent.requestPermission();
-    if (permission === "granted") {
-      window.addEventListener("deviceorientation", handleOrientation);
-    }
-  } else {
-    window.addEventListener("deviceorientationabsolute", handleOrientation);
-  }
-}
-
-function handleOrientation(e) {
-  if (e.webkitCompassHeading !== undefined) heading = e.webkitCompassHeading;
-  else if (e.alpha !== null) heading = e.alpha;
-}
-
-function confirm() {
-  if (heading === null) return alert("Compass not ready");
-  navigator.geolocation.getCurrentPosition(pos => {
-    fetch("https://towercamlvl2.onrender.com/report", {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({
-        lat: pos.coords.latitude,
-        lon: pos.coords.longitude,
-        bearing: heading,
-        time: Date.now()
-      })
+  try {
+    // Camera
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" }
     });
-    alert("Pointing confirmed");
-  });
-}
-</script>
+    document.getElementById("video").srcObject = stream;
 
-</body>
-</html>
+    // Orientation permissions (iOS 13+)
+    if (typeof DeviceOrientationEvent?.requestPermission === "function") {
+      const permission = await DeviceOrientationEvent.requestPermission();
+      if (permission === "granted") {
+        window.addEventListener("deviceorientation", handleOrientation);
+        sensorEnabled = true;
+        document.getElementById("status").innerText = "Compass ready";
+      } else {
+        alert("Orientation permission denied");
+      }
+    } else {
+      // Android / fallback
+      window.addEventListener("deviceorientationabsolute", handleOrientation);
+      sensorEnabled = true;
+      document.getElementB
