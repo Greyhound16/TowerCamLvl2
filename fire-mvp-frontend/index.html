@@ -3,23 +3,92 @@
 <head>
   <title>Fire Tower MVP</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    /* Fullscreen video */
+    #video {
+      width: 100%;
+      height: 100vh;
+      object-fit: cover;
+    }
+
+    /* Crosshairs */
+    #crosshair {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 40px;
+      height: 40px;
+      margin-left: -20px;
+      margin-top: -20px;
+      pointer-events: none; /* allow clicking buttons */
+    }
+
+    #crosshair::before,
+    #crosshair::after {
+      content: '';
+      position: absolute;
+      background: red;
+    }
+
+    /* Horizontal line */
+    #crosshair::before {
+      top: 50%;
+      left: 0;
+      width: 100%;
+      height: 2px;
+      transform: translateY(-50%);
+    }
+
+    /* Vertical line */
+    #crosshair::after {
+      top: 0;
+      left: 50%;
+      width: 2px;
+      height: 100%;
+      transform: translateX(-50%);
+    }
+
+    /* Buttons & status */
+    #controls {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      z-index: 10;
+      background: rgba(0,0,0,0.4);
+      padding: 10px;
+      border-radius: 10px;
+      color: white;
+    }
+
+    button {
+      margin: 5px;
+      padding: 10px 15px;
+      font-size: 16px;
+    }
+
+    #status, #headingDisplay {
+      margin: 5px 0;
+    }
+  </style>
 </head>
 <body>
 
-<h2>Fire Tower MVP</h2>
+<video id="video" autoplay playsinline></video>
+<div id="crosshair"></div>
 
-<video id="video" autoplay playsinline width="100%"></video>
-
-<button id="enableBtn">ENABLE SENSORS</button>
-<button id="confirmBtn">CONFIRM POINTING</button>
-
-<p id="status">Compass not ready</p>
+<div id="controls">
+  <p id="status">Compass not ready</p>
+  <p id="headingDisplay"></p>
+  <button id="enableBtn">ENABLE SENSORS</button>
+  <button id="confirmBtn">CONFIRM POINTING</button>
+</div>
 
 <script>
 let heading = null;
 let sensorEnabled = false;
 
-// Enable camera and device orientation
 async function enableSensors() {
   try {
     // Camera
@@ -42,4 +111,69 @@ async function enableSensors() {
       // Android / fallback
       window.addEventListener("deviceorientationabsolute", handleOrientation);
       sensorEnabled = true;
-      document.getElementB
+      document.getElementById("status").innerText = "Compass ready";
+    }
+
+    // Retry in case heading is null initially
+    setInterval(() => {
+      if (heading === null && sensorEnabled) {
+        document.getElementById("status").innerText = "Initializing compass...";
+      }
+    }, 500);
+
+  } catch (err) {
+    console.error(err);
+    alert("Error accessing camera or sensors");
+  }
+}
+
+function handleOrientation(e) {
+  if (e.webkitCompassHeading !== undefined) heading = e.webkitCompassHeading; // iOS
+  else if (e.alpha !== null) heading = e.alpha; // Android / fallback
+
+  if (heading !== null) {
+    document.getElementById("status").innerText = "Compass ready";
+    document.getElementById("headingDisplay").innerText = "Heading: " + heading.toFixed(1) + "°";
+    console.log("Heading updated:", heading);
+  }
+}
+
+function confirmPointing() {
+  if (!sensorEnabled) return alert("Please tap ENABLE SENSORS first");
+  if (heading === null) return alert("Compass still initializing. Move the phone slowly.");
+
+  navigator.geolocation.getCurrentPosition(pos => {
+    const payload = {
+      lat: pos.coords.latitude,
+      lon: pos.coords.longitude,
+      bearing: heading,
+      time: Date.now()
+    };
+    console.log("Sending payload:", payload);
+
+    fetch("https://fire-mvp-backend.onrender.com", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    })
+    .then(res => res.json())
+    .then(data => {
+      console.log("Backend response:", data);
+      alert("Pointing confirmed. Fire report sent.");
+    })
+    .catch(err => {
+      console.error(err);
+      alert("Error sending to backend");
+    });
+  }, err => {
+    console.error(err);
+    alert("Error getting geolocation");
+  }, { enableHighAccuracy: true });
+}
+
+document.getElementById("enableBtn").addEventListener("click", enableSensors);
+document.getElementById("confirmBtn").addEventListener("click", confirmPointing);
+</script>
+
+</body>
+</html>
