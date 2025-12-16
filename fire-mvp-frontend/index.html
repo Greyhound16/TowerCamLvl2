@@ -6,39 +6,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <style>
-body {
-  margin: 0;
-  background: black;
-  color: white;
-  font-family: Arial, sans-serif;
-  text-align: center;
-}
-
-video {
-  width: 100vw;
-  height: 60vh;
-  object-fit: cover;
-  margin-top: 20px;
-}
+body { margin:0; background:black; color:white; font-family:Arial,sans-serif; text-align:center; }
+video { width:100vw; height:60vh; object-fit:cover; margin-top:20px; }
 
 /* Crosshairs */
-.cross-v, .cross-h {
-  position: fixed;
-  background: rgba(255,0,0,0.8);
-  z-index: 10;
-}
-.cross-v { width: 2px; height: 100vh; left: 50%; top: 0; }
-.cross-h { height: 2px; width: 100vw; top: 50%; left: 0; }
+.cross-v,.cross-h{position:fixed;background:rgba(255,0,0,0.8);z-index:10;}
+.cross-v{width:2px;height:100vh;left:50%;top:0;}
+.cross-h{height:2px;width:100vw;top:50%;left:0;}
 
-#panel {
-  position: fixed;
-  bottom: 10px;
-  width: 100%;
-  text-align: center;
-  z-index: 20;
-}
-
-button, input { font-size: 18px; padding: 6px; margin: 4px; }
+#panel{position:fixed;bottom:10px;width:100%;text-align:center;z-index:20;}
+button,input{font-size:18px;padding:6px;margin:4px;}
 </style>
 </head>
 
@@ -46,7 +23,7 @@ button, input { font-size: 18px; padding: 6px; margin: 4px; }
 
 <div id="panel">
   <input id="tower" placeholder="Tower ID (A/B/C)">
-  <div id="status">Press START to activate camera & GPS</div>
+  <div id="status">Press START to enable camera & compass</div>
   <button id="startBtn">START</button>
   <button id="confirmBtn" disabled>CONFIRM</button>
 </div>
@@ -59,54 +36,74 @@ button, input { font-size: 18px; padding: 6px; margin: 4px; }
 const BACKEND = "https://fire-mvp-backend.onrender.com";
 
 let lat = null, lon = null;
-let bearing = 0; // camera-forward
+let heading = null;
 const statusEl = document.getElementById('status');
 const confirmBtn = document.getElementById('confirmBtn');
 const startBtn = document.getElementById('startBtn');
 const video = document.getElementById('video');
 
-// START CAMERA & GPS (iPhone-safe)
+// Start camera + request compass
 startBtn.addEventListener('click', async () => {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }});
+    // CAMERA
+    const stream = await navigator.mediaDevices.getUserMedia({ video:{facingMode:"environment"} });
     video.srcObject = stream;
-    statusEl.innerText = "Camera started, waiting for GPS…";
 
+    // COMPASS PERMISSION (iOS)
+    if (typeof DeviceOrientationEvent.requestPermission === "function") {
+      const response = await DeviceOrientationEvent.requestPermission();
+      if (response !== "granted") throw new Error("Compass permission denied");
+    }
+
+    // Listen to orientation
+    window.addEventListener("deviceorientation", e => {
+      if (e.webkitCompassHeading !== undefined) { // iOS
+        heading = e.webkitCompassHeading; 
+      } else if (e.alpha !== null) { // fallback
+        heading = (360 - e.alpha + (screen.orientation?.angle||0)) % 360;
+      }
+      if (heading !== null) {
+        statusEl.innerText = "Heading: " + heading.toFixed(1) + "°, GPS waiting…";
+      }
+    });
+
+    // GPS
     navigator.geolocation.watchPosition(
       p => {
         lat = p.coords.latitude;
         lon = p.coords.longitude;
-        statusEl.innerText = "GPS ready – aim at smoke and tap CONFIRM";
-        confirmBtn.disabled = false;
+        if (heading !== null) {
+          statusEl.innerText = "Ready – aim at smoke and tap CONFIRM";
+          confirmBtn.disabled = false;
+        } else {
+          statusEl.innerText = "Compass initializing… move phone slowly";
+        }
       },
-      e => {
-        alert("Location error: " + e.message);
-        statusEl.innerText = "GPS error";
-      },
-      { enableHighAccuracy: true }
+      e => { alert("Location error: "+e.message); statusEl.innerText="GPS error"; },
+      { enableHighAccuracy:true }
     );
 
     startBtn.disabled = true;
-  } catch(err) {
-    alert("Camera access denied or unavailable: " + err.message);
+  } catch(err){
+    alert("Error starting camera or compass: " + err.message);
   }
 });
 
 // CONFIRM BUTTON
 confirmBtn.addEventListener('click', () => {
-  if (lat === null || lon === null) {
-    alert("GPS not ready");
+  if (lat===null || lon===null || heading===null){
+    alert("GPS or compass not ready");
     return;
   }
 
   fetch(BACKEND + "/report", {
-    method: "POST",
-    headers: {"Content-Type":"application/json"},
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
     body: JSON.stringify({
       tower: document.getElementById('tower').value || "X",
       lat: lat,
       lon: lon,
-      bearing: bearing
+      bearing: heading
     })
   });
 

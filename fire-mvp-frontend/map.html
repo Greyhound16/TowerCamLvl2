@@ -6,83 +6,56 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
-
-<style>
-#map {
-  height: 100vh;
-}
-</style>
+<style>#map{height:100vh;}</style>
 </head>
 
 <body>
 <div id="map"></div>
-
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script>
 const BACKEND = "https://fire-mvp-backend.onrender.com";
-
-const map = L.map("map").setView([15.5, 120.6], 12);
+const map = L.map("map").setView([15.5,120.6],12);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-let layers = [];
-let hasCentered = false;
+let layers=[];
+let hasCentered=false;
 
-// Draw 2 km geodesic bearing line
 function drawLine(lat, lon, bearing, label){
-  const R = 6371; // Earth radius in km
-  const d = 2;    // 2 km
-  const brng = bearing * Math.PI / 180;
-  const lat1 = lat * Math.PI / 180;
-  const lon1 = lon * Math.PI / 180;
+  const R = 6371;
+  const d = 2;
+  const brng = bearing*Math.PI/180;
+  const lat1 = lat*Math.PI/180;
+  const lon1 = lon*Math.PI/180;
 
-  const lat2 = Math.asin(
-    Math.sin(lat1)*Math.cos(d/R) +
-    Math.cos(lat1)*Math.sin(d/R)*Math.cos(brng)
-  );
-
-  const lon2 = lon1 + Math.atan2(
-    Math.sin(brng)*Math.sin(d/R)*Math.cos(lat1),
-    Math.cos(d/R) - Math.sin(lat1)*Math.sin(lat2)
-  );
-
+  const lat2 = Math.asin(Math.sin(lat1)*Math.cos(d/R) + Math.cos(lat1)*Math.sin(d/R)*Math.cos(brng));
+  const lon2 = lon1 + Math.atan2(Math.sin(brng)*Math.sin(d/R)*Math.cos(lat1), Math.cos(d/R)-Math.sin(lat1)*Math.sin(lat2));
   const endLat = lat2*180/Math.PI;
   const endLon = lon2*180/Math.PI;
 
-  const line = L.polyline([[lat, lon], [endLat, endLon]], {
-    color: "red",
-    weight: 3
-  }).addTo(map);
-
-  const marker = L.marker([lat, lon]).addTo(map)
-    .bindPopup("Tower " + label + "<br>Bearing: " + bearing.toFixed(1) + "°");
-
-  layers.push(line, marker);
+  const line = L.polyline([[lat,lon],[endLat,endLon]],{color:"red",weight:3}).addTo(map);
+  const marker = L.marker([lat,lon]).addTo(map).bindPopup("Tower "+label+"<br>Bearing: "+bearing.toFixed(1)+"°");
+  layers.push(line,marker);
 }
 
-// Fetch reports and update map
 async function update(){
-  layers.forEach(l => map.removeLayer(l));
-  layers = [];
-
+  layers.forEach(l=>map.removeLayer(l));
+  layers=[];
   const res = await fetch(BACKEND + "/reports");
   const data = await res.json();
 
-  let first = true;
-
+  let first=true;
   for (let k in data){
     const { lat, lon, bearing } = data[k];
-
     if (!hasCentered && first){
-      map.setView([lat, lon], 14);
-      hasCentered = true;
-      first = false;
+      map.setView([lat,lon],14);
+      hasCentered=true;
+      first=false;
     }
-
-    drawLine(lat, lon, bearing, k);
+    drawLine(lat,lon,bearing,k);
   }
 }
 
-setInterval(update, 1000);
+setInterval(update,1000);
 </script>
 </body>
 </html>
