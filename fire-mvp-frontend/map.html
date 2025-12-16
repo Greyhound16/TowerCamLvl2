@@ -1,63 +1,40 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Fire Map</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
+<style>#map{height:100vh}</style>
 </head>
 <body>
-
-<div id="map" style="height:100vh"></div>
-
+<div id="map"></div>
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
 <script>
 const BACKEND = "https://fire-mvp-backend.onrender.com";
 
-let map = L.map("map").setView([14,121], 13);
+const map = L.map("map").setView([14,121],13);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-let fireMarker = null;
-let bearingLines = [];
+let lines = [];
 
-function drawBearingLine(lat, lon, bearing, lengthMeters=1000) {
-  // Convert bearing to radians
-  const theta = bearing * Math.PI / 180;
-
-  // Approximate destination using simple flat projection
-  const deltaLat = (lengthMeters * Math.cos(theta)) / 111320; // meters per degree
-  const deltaLon = (lengthMeters * Math.sin(theta)) / (111320 * Math.cos(lat * Math.PI/180));
-
-  const lat2 = lat + deltaLat;
-  const lon2 = lon + deltaLon;
-
-  return [[lat, lon], [lat2, lon2]];
+function draw(lat,lon,b){
+  const r=b*Math.PI/180;
+  const dLat=Math.cos(r)*0.02;
+  const dLon=Math.sin(r)*0.02;
+  return [[lat,lon],[lat+dLat,lon+dLon]];
 }
 
-async function update() {
-  let res = await fetch(BACKEND + "/latest");
-  let data = await res.json();
+async function update(){
+  lines.forEach(l=>map.removeLayer(l));
+  lines=[];
 
-  // Clear old bearing lines
-  bearingLines.forEach(line => map.removeLayer(line));
-  bearingLines = [];
-
-  if (data.lat) {
-    // Fire pin
-    if (fireMarker) map.removeLayer(fireMarker);
-    fireMarker = L.marker([data.lat, data.lon], {title: "Fire Location"}).addTo(map);
-    map.setView([data.lat, data.lon], 15);
-
-    // Draw lines from towers
-    data.towers.forEach(tower => {
-      const lineCoords = drawBearingLine(tower.lat, tower.lon, tower.bearing);
-      const line = L.polyline(lineCoords, {color: 'red', dashArray: '5,5'}).addTo(map);
-      bearingLines.push(line);
-    });
-  }
-  setTimeout(update, 3000);
+  const data = await (await fetch(BACKEND+"/reports")).json();
+  Object.values(data).forEach(t=>{
+    lines.push(L.polyline(draw(t.lat,t.lon,t.bearing),
+      {color:"red"}).addTo(map));
+  });
+  setTimeout(update,1000);
 }
 update();
 </script>
-
 </body>
 </html>
