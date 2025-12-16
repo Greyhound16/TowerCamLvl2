@@ -62,21 +62,15 @@ button, input {
 
 <div id="panel">
   <input id="tower" placeholder="Tower ID (A/B/C)">
-  <div id="status">Compass initializing… move phone slowly</div>
-  <button onclick="calibrate()">CALIBRATE NORTH</button>
+  <div id="status">Waiting for GPS…</div>
   <button onclick="send()">CONFIRM</button>
 </div>
 
 <script>
 const BACKEND = "https://fire-mvp-backend.onrender.com";
 
-// Lock portrait (Android fix)
-screen.orientation?.lock?.("portrait").catch(()=>{});
-
 let lat = null, lon = null;
-let rawHeading = null;
-let heading = null;
-let offset = 0;
+let bearing = 0; // Forward-facing relative bearing
 
 // CAMERA
 navigator.mediaDevices.getUserMedia({
@@ -84,50 +78,23 @@ navigator.mediaDevices.getUserMedia({
 }).then(stream => video.srcObject = stream);
 
 // LOCATION
-navigator.geolocation.watchPosition(p => {
-  lat = p.coords.latitude;
-  lon = p.coords.longitude;
-}, e => alert("Location error"), {
-  enableHighAccuracy: true
-});
+navigator.geolocation.watchPosition(
+  p => {
+    lat = p.coords.latitude;
+    lon = p.coords.longitude;
+    status.innerText = "GPS ready – aim at smoke and tap CONFIRM";
+  },
+  e => {
+    alert("Location error: " + e.message);
+    status.innerText = "GPS error";
+  },
+  { enableHighAccuracy: true }
+);
 
-// COMPASS HANDLING
-function onOrientation(e){
-  if (e.webkitCompassHeading !== undefined) {
-    rawHeading = e.webkitCompassHeading; // iOS
-  } else if (e.alpha !== null) {
-    rawHeading = (360 - e.alpha + (screen.orientation?.angle || 0)) % 360;
-  }
-
-  if (rawHeading !== null) {
-    heading = (rawHeading + offset + 360) % 360;
-    status.innerText = "Heading: " + heading.toFixed(1) + "°";
-  }
-}
-
-// iOS permission
-if (typeof DeviceOrientationEvent?.requestPermission === "function") {
-  DeviceOrientationEvent.requestPermission().then(p => {
-    if (p === "granted")
-      window.addEventListener("deviceorientation", onOrientation);
-  });
-} else {
-  window.addEventListener("deviceorientationabsolute", onOrientation);
-  window.addEventListener("deviceorientation", onOrientation);
-}
-
-function calibrate(){
-  if (rawHeading === null) {
-    alert("Compass not ready");
-    return;
-  }
-  offset = (360 - rawHeading) % 360;
-  alert("Calibrated. Now point at smoke.");
-}
-
+// SEND DATA TO BACKEND
 function send(){
-  if (lat === null || lon === null || heading === null) {
-    alert("Sensors not ready");
+  if (lat === null || lon === null) {
+    alert("GPS not ready");
     return;
   }
 
@@ -138,7 +105,7 @@ function send(){
       tower: tower.value || "X",
       lat: lat,
       lon: lon,
-      bearing: heading
+      bearing: bearing // always forward-facing
     })
   });
 
