@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Tower Camera MVP</title>
+<title>Fire Tower MVP</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <style>
@@ -11,7 +11,6 @@ body {
   background: black;
   color: white;
   font-family: Arial, sans-serif;
-  text-align: center;
 }
 
 video {
@@ -21,36 +20,35 @@ video {
 }
 
 /* Crosshairs */
-#crosshair-vertical, #crosshair-horizontal {
+.cross-v, .cross-h {
   position: fixed;
   background: rgba(255,0,0,0.8);
   z-index: 10;
 }
-
-#crosshair-vertical {
+.cross-v {
   width: 2px;
   height: 100vh;
   left: 50%;
   top: 0;
 }
-
-#crosshair-horizontal {
+.cross-h {
   height: 2px;
   width: 100vw;
   top: 50%;
   left: 0;
 }
 
-#controls {
+#panel {
   position: fixed;
   bottom: 10px;
   width: 100%;
+  text-align: center;
   z-index: 20;
 }
 
 button, input {
   font-size: 18px;
-  padding: 8px;
+  padding: 6px;
   margin: 4px;
 }
 </style>
@@ -59,10 +57,10 @@ button, input {
 <body>
 
 <video id="video" autoplay playsinline></video>
-<div id="crosshair-vertical"></div>
-<div id="crosshair-horizontal"></div>
+<div class="cross-v"></div>
+<div class="cross-h"></div>
 
-<div id="controls">
+<div id="panel">
   <input id="tower" placeholder="Tower ID (A/B/C)">
   <div id="status">Compass initializing… move phone slowly</div>
   <button onclick="calibrate()">CALIBRATE NORTH</button>
@@ -72,28 +70,33 @@ button, input {
 <script>
 const BACKEND = "https://fire-mvp-backend.onrender.com";
 
-let lat = null;
-let lon = null;
+// Lock portrait (Android fix)
+screen.orientation?.lock?.("portrait").catch(()=>{});
+
+let lat = null, lon = null;
 let rawHeading = null;
 let heading = null;
 let offset = 0;
 
 // CAMERA
-navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }})
-.then(stream => video.srcObject = stream);
+navigator.mediaDevices.getUserMedia({
+  video: { facingMode: "environment" }
+}).then(stream => video.srcObject = stream);
 
 // LOCATION
 navigator.geolocation.watchPosition(p => {
   lat = p.coords.latitude;
   lon = p.coords.longitude;
+}, e => alert("Location error"), {
+  enableHighAccuracy: true
 });
 
-// COMPASS
-function handleOrientation(e){
+// COMPASS HANDLING
+function onOrientation(e){
   if (e.webkitCompassHeading !== undefined) {
-    rawHeading = e.webkitCompassHeading;
+    rawHeading = e.webkitCompassHeading; // iOS
   } else if (e.alpha !== null) {
-    rawHeading = 360 - e.alpha;
+    rawHeading = (360 - e.alpha + (screen.orientation?.angle || 0)) % 360;
   }
 
   if (rawHeading !== null) {
@@ -106,11 +109,11 @@ function handleOrientation(e){
 if (typeof DeviceOrientationEvent?.requestPermission === "function") {
   DeviceOrientationEvent.requestPermission().then(p => {
     if (p === "granted")
-      window.addEventListener("deviceorientation", handleOrientation);
+      window.addEventListener("deviceorientation", onOrientation);
   });
 } else {
-  window.addEventListener("deviceorientationabsolute", handleOrientation);
-  window.addEventListener("deviceorientation", handleOrientation);
+  window.addEventListener("deviceorientationabsolute", onOrientation);
+  window.addEventListener("deviceorientation", onOrientation);
 }
 
 function calibrate(){
@@ -133,7 +136,9 @@ function send(){
     headers: {"Content-Type":"application/json"},
     body: JSON.stringify({
       tower: tower.value || "X",
-      lat, lon, bearing: heading
+      lat: lat,
+      lon: lon,
+      bearing: heading
     })
   });
 
