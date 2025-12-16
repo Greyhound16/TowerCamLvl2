@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Fire Bearings Map</title>
+<title>Fire Bearings Map with Triangulation</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
@@ -18,23 +18,76 @@ const map = L.map("map").setView([15.5,120.6],12);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
 let layers=[];
-let hasCentered=false;
+let triangulationMarker=null;
 
-function drawLine(lat, lon, bearing, label){
-  const R = 6371;
-  const d = 2;
-  const brng = bearing*Math.PI/180;
-  const lat1 = lat*Math.PI/180;
-  const lon1 = lon*Math.PI/180;
+// convert degrees to radians
+function toRad(deg){return deg*Math.PI/180;}
+// convert radians to degrees
+function toDeg(rad){return rad*180/Math.PI;}
+
+// compute destination point given lat, lon, bearing, distance (km)
+function destination(lat, lon, bearing, d){
+  const R = 6371; // km
+  const brng = toRad(bearing);
+  const lat1 = toRad(lat);
+  const lon1 = toRad(lon);
 
   const lat2 = Math.asin(Math.sin(lat1)*Math.cos(d/R) + Math.cos(lat1)*Math.sin(d/R)*Math.cos(brng));
   const lon2 = lon1 + Math.atan2(Math.sin(brng)*Math.sin(d/R)*Math.cos(lat1), Math.cos(d/R)-Math.sin(lat1)*Math.sin(lat2));
-  const endLat = lat2*180/Math.PI;
-  const endLon = lon2*180/Math.PI;
 
-  const line = L.polyline([[lat,lon],[endLat,endLon]],{color:"red",weight:3}).addTo(map);
-  const marker = L.marker([lat,lon]).addTo(map).bindPopup("Tower "+label+"<br>Bearing: "+bearing.toFixed(1)+"°");
+  return [lat2*180/Math.PI, lon2*180/Math.PI];
+}
+
+// draw bearing line from tower
+function drawLine(lat, lon, bearing, label){
+  const end = destination(lat, lon, bearing, 2); // 2 km line
+  const line = L.polyline([[lat, lon], end],{color:"red",weight:3}).addTo(map);
+  const marker = L.marker([lat, lon]).addTo(map).bindPopup("Tower "+label+"<br>Bearing: "+bearing.toFixed(1)+"°");
   layers.push(line,marker);
+}
+
+// convert lat/lon to Cartesian meters (for triangulation)
+function latLonToXY(lat, lon){
+  const R = 6371*1000;
+  const x = R*toRad(lon)*Math.cos(toRad(lat));
+  const y = R*toRad(lat);
+  return [x, y];
+}
+
+function xyToLatLon(x, y){
+  const R = 6371*1000;
+  const lat = y/R * 180/Math.PI;
+  const lon = x/(R*Math.cos(toRad(lat))) * 180/Math.PI;
+  return [lat, lon];
+}
+
+// compute intersection of two lines given point + bearing
+function intersection(p1, b1, p2, b2){
+  const [x1,y1]=latLonToXY(p1.lat,p1.lon);
+  const [x2,y2]=latLonToXY(p2.lat,p2.lon);
+  const m1 = Math.tan(toRad(b1));
+  const m2 = Math.tan(toRad(b2));
+  const x = (m1*x1 - m2*x2 + y2 - y1)/(m1 - m2);
+  const y = m1*(x - x1) + y1;
+  return xyToLatLon(x, y);
+}
+
+// triangulate from 3 towers
+function triangulate(data){
+  if(Object.keys(data).length<2) return null;
+  const keys = Object.keys(data);
+  let points=[];
+  for(let i=0;i<keys.length-1;i++){
+    for(let j=i+1;j<keys.length;j++){
+      const a = data[keys[i]];
+      const b = data[keys[j]];
+      points.push(intersection(a, a.bearing, b, b.bearing));
+    }
+  }
+  // average points
+  const avgLat = points.reduce((sum,p)=>sum+p[0],0)/points.length;
+  const avgLon = points.reduce((sum,p)=>sum+p[1],0)/points.length;
+  return [avgLat, avgLon];
 }
 
 async function update(){
@@ -43,16 +96,22 @@ async function update(){
   const res = await fetch(BACKEND + "/reports");
   const data = await res.json();
 
-  let first=true;
-  for (let k in data){
+  // draw individual bearing lines
+  for(let k in data){
     const { lat, lon, bearing } = data[k];
-    if (!hasCentered && first){
-      map.setView([lat,lon],14);
-      hasCentered=true;
-      first=false;
-    }
-    drawLine(lat,lon,bearing,k);
+    drawLine(lat, lon, bearing, k);
   }
+
+  // triangulate
+  const triPoint = triangulate(data);
+  if(triPoint){
+    if(triangulationMarker) map.removeLayer(triangulationMarker);
+    triangulationMarker = L.marker(triPoint,{icon:L.icon({iconUrl:"https://maps.google.com/mapfiles/ms/icons/blue-dot.png",iconSize:[32,32]})})
+      .addTo(map).bindPopup("Triangulated Fire Location");
+  }
+
+  // auto-center map on triangulated point
+  if(triPoint) map.setView(triPoint,14);
 }
 
 setInterval(update,1000);

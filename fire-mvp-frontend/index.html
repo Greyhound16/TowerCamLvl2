@@ -2,30 +2,30 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Fire Tower MVP</title>
+<title>Fire Tower MVP - Hybrid</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-
 <style>
-body { margin:0; background:black; color:white; font-family:Arial,sans-serif; text-align:center; }
-video { width:100vw; height:60vh; object-fit:cover; margin-top:20px; }
-
-/* Crosshairs */
+body{margin:0;background:black;color:white;font-family:Arial,sans-serif;text-align:center;}
+video{width:100vw;height:60vh;object-fit:cover;margin-top:20px;}
 .cross-v,.cross-h{position:fixed;background:rgba(255,0,0,0.8);z-index:10;}
 .cross-v{width:2px;height:100vh;left:50%;top:0;}
 .cross-h{height:2px;width:100vw;top:50%;left:0;}
-
 #panel{position:fixed;bottom:10px;width:100%;text-align:center;z-index:20;}
-button,input{font-size:18px;padding:6px;margin:4px;}
+button,input,select{font-size:18px;padding:6px;margin:4px;}
+#sliderContainer{margin-top:10px;display:none;}
 </style>
 </head>
 
 <body>
-
 <div id="panel">
   <input id="tower" placeholder="Tower ID (A/B/C)">
   <div id="status">Press START to enable camera & compass</div>
   <button id="startBtn">START</button>
   <button id="confirmBtn" disabled>CONFIRM</button>
+  <div id="sliderContainer">
+    <input type="range" id="bearingSlider" min="0" max="360" value="0">
+    <div>Bearing: <span id="bearingVal">0</span>°</div>
+  </div>
 </div>
 
 <video id="video" autoplay playsinline></video>
@@ -35,81 +35,73 @@ button,input{font-size:18px;padding:6px;margin:4px;}
 <script>
 const BACKEND = "https://fire-mvp-backend.onrender.com";
 
-let lat = null, lon = null;
-let heading = null;
-const statusEl = document.getElementById('status');
-const confirmBtn = document.getElementById('confirmBtn');
-const startBtn = document.getElementById('startBtn');
-const video = document.getElementById('video');
+let lat=null, lon=null, heading=null;
+const statusEl=document.getElementById('status');
+const confirmBtn=document.getElementById('confirmBtn');
+const startBtn=document.getElementById('startBtn');
+const video=document.getElementById('video');
+const sliderContainer=document.getElementById('sliderContainer');
+const bearingSlider=document.getElementById('bearingSlider');
+const bearingVal=document.getElementById('bearingVal');
 
-// Start camera + request compass
-startBtn.addEventListener('click', async () => {
-  try {
-    // CAMERA
-    const stream = await navigator.mediaDevices.getUserMedia({ video:{facingMode:"environment"} });
-    video.srcObject = stream;
+function isIOS(){return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;}
 
-    // COMPASS PERMISSION (iOS)
-    if (typeof DeviceOrientationEvent.requestPermission === "function") {
-      const response = await DeviceOrientationEvent.requestPermission();
-      if (response !== "granted") throw new Error("Compass permission denied");
-    }
-
-    // Listen to orientation
-    window.addEventListener("deviceorientation", e => {
-      if (e.webkitCompassHeading !== undefined) { // iOS
-        heading = e.webkitCompassHeading; 
-      } else if (e.alpha !== null) { // fallback
-        heading = (360 - e.alpha + (screen.orientation?.angle||0)) % 360;
-      }
-      if (heading !== null) {
-        statusEl.innerText = "Heading: " + heading.toFixed(1) + "°, GPS waiting…";
-      }
-    });
+startBtn.addEventListener('click', async ()=>{
+  try{
+    // Camera
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+    video.srcObject=stream;
 
     // GPS
-    navigator.geolocation.watchPosition(
-      p => {
-        lat = p.coords.latitude;
-        lon = p.coords.longitude;
-        if (heading !== null) {
-          statusEl.innerText = "Ready – aim at smoke and tap CONFIRM";
-          confirmBtn.disabled = false;
-        } else {
-          statusEl.innerText = "Compass initializing… move phone slowly";
-        }
-      },
-      e => { alert("Location error: "+e.message); statusEl.innerText="GPS error"; },
-      { enableHighAccuracy:true }
-    );
+    navigator.geolocation.watchPosition(p=>{
+      lat=p.coords.latitude;
+      lon=p.coords.longitude;
+      if((heading!==null)||isIOS()){
+        statusEl.innerText="Ready – aim at smoke and tap CONFIRM";
+        confirmBtn.disabled=false;
+      }else{
+        statusEl.innerText="Compass initializing… move device slowly";
+      }
+    },e=>{alert("Location error: "+e.message);statusEl.innerText="GPS error";},{enableHighAccuracy:true});
 
-    startBtn.disabled = true;
-  } catch(err){
-    alert("Error starting camera or compass: " + err.message);
-  }
+    // Platform-specific
+    if(isIOS()){
+      // Show slider for manual bearing
+      sliderContainer.style.display="block";
+      heading=bearingSlider.value;
+      bearingSlider.addEventListener('input',()=>{
+        heading=bearingSlider.value;
+        bearingVal.innerText=heading;
+      });
+    }else{
+      // Android - true compass
+      window.addEventListener("deviceorientationabsolute",e=>{
+        if(e.absolute && e.alpha!==null){
+          heading=(360-e.alpha+(screen.orientation?.angle||0))%360;
+          statusEl.innerText="Heading: "+heading.toFixed(1)+"°, GPS ready";
+        }
+      });
+      window.addEventListener("deviceorientation",e=>{
+        if(heading===null && e.alpha!==null){
+          heading=(360-e.alpha+(screen.orientation?.angle||0))%360;
+          statusEl.innerText="Heading: "+heading.toFixed(1)+"°, GPS ready";
+        }
+      });
+    }
+
+    startBtn.disabled=true;
+  }catch(err){alert("Error starting camera/compass: "+err.message);}
 });
 
-// CONFIRM BUTTON
-confirmBtn.addEventListener('click', () => {
-  if (lat===null || lon===null || heading===null){
-    alert("GPS or compass not ready");
+confirmBtn.addEventListener('click',()=>{
+  if(lat===null||lon===null||heading===null){
+    alert("GPS or bearing not ready");
     return;
   }
-
-  fetch(BACKEND + "/report", {
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({
-      tower: document.getElementById('tower').value || "X",
-      lat: lat,
-      lon: lon,
-      bearing: heading
-    })
-  });
-
-  statusEl.innerText = "Sent ✓";
+  fetch(BACKEND+"/report",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({tower:document.getElementById('tower').value||"X",lat,lon,bearing})});
+  statusEl.innerText="Sent ✓";
 });
 </script>
-
 </body>
 </html>
