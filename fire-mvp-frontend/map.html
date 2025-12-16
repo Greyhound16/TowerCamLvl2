@@ -1,40 +1,66 @@
 <!DOCTYPE html>
 <html>
 <head>
-<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
-<style>#map{height:100vh}</style>
+<meta charset="utf-8">
+<title>Tower Bearings Map</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+
+<style>
+#map {
+  height: 100vh;
+}
+</style>
 </head>
+
 <body>
 <div id="map"></div>
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script>
 const BACKEND = "https://fire-mvp-backend.onrender.com";
 
-const map = L.map("map").setView([14,121],13);
+// URL centering support
+const params = new URLSearchParams(location.search);
+const centerLat = parseFloat(params.get("lat")) || 14.6;
+const centerLon = parseFloat(params.get("lon")) || 121.0;
+const zoom = parseInt(params.get("zoom")) || 13;
+
+const map = L.map("map").setView([centerLat, centerLon], zoom);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-let lines = [];
+let layers = [];
 
-function draw(lat,lon,b){
-  const r=b*Math.PI/180;
-  const dLat=Math.cos(r)*0.02;
-  const dLon=Math.sin(r)*0.02;
-  return [[lat,lon],[lat+dLat,lon+dLon]];
+function drawLine(lat, lon, bearing, label){
+  const r = bearing * Math.PI / 180;
+  const endLat = lat + Math.cos(r) * 0.1;
+  const endLon = lon + Math.sin(r) * 0.1;
+
+  const line = L.polyline([[lat, lon],[endLat,endLon]], {
+    color: "red",
+    weight: 3
+  }).addTo(map);
+
+  const marker = L.marker([lat,lon]).addTo(map)
+    .bindPopup("Tower " + label + "<br>" + bearing.toFixed(1) + "°");
+
+  layers.push(line, marker);
 }
 
 async function update(){
-  lines.forEach(l=>map.removeLayer(l));
-  lines=[];
+  layers.forEach(l => map.removeLayer(l));
+  layers = [];
 
-  const data = await (await fetch(BACKEND+"/reports")).json();
-  Object.values(data).forEach(t=>{
-    lines.push(L.polyline(draw(t.lat,t.lon,t.bearing),
-      {color:"red"}).addTo(map));
-  });
-  setTimeout(update,1000);
+  const res = await fetch(BACKEND + "/reports");
+  const data = await res.json();
+
+  for (let k in data){
+    drawLine(data[k].lat, data[k].lon, data[k].bearing, k);
+  }
 }
-update();
+
+setInterval(update, 1000);
 </script>
 </body>
 </html>

@@ -1,63 +1,143 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8">
+<title>Tower Camera MVP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
 <style>
-video { width:100vw; height:100vh; object-fit:cover; }
-#cross { position:fixed; top:50%; left:50%; width:40px; height:40px;
-transform:translate(-50%,-50%);
+body {
+  margin: 0;
+  background: black;
+  color: white;
+  font-family: Arial, sans-serif;
+  text-align: center;
 }
-#cross:before,#cross:after {
-content:""; position:absolute; background:red;
+
+video {
+  width: 100vw;
+  height: 100vh;
+  object-fit: cover;
 }
-#cross:before { width:100%; height:2px; top:50%; }
-#cross:after { height:100%; width:2px; left:50%; }
-#panel { position:fixed; bottom:10px; left:50%; transform:translateX(-50%);
-background:rgba(0,0,0,.6); color:white; padding:10px; border-radius:10px; }
+
+/* Crosshairs */
+#crosshair-vertical, #crosshair-horizontal {
+  position: fixed;
+  background: rgba(255,0,0,0.8);
+  z-index: 10;
+}
+
+#crosshair-vertical {
+  width: 2px;
+  height: 100vh;
+  left: 50%;
+  top: 0;
+}
+
+#crosshair-horizontal {
+  height: 2px;
+  width: 100vw;
+  top: 50%;
+  left: 0;
+}
+
+#controls {
+  position: fixed;
+  bottom: 10px;
+  width: 100%;
+  z-index: 20;
+}
+
+button, input {
+  font-size: 18px;
+  padding: 8px;
+  margin: 4px;
+}
 </style>
 </head>
 
 <body>
 
-<video id="cam" autoplay playsinline></video>
-<div id="cross"></div>
+<video id="video" autoplay playsinline></video>
+<div id="crosshair-vertical"></div>
+<div id="crosshair-horizontal"></div>
 
-<div id="panel">
-  <div id="heading">Heading: --</div>
-  <button onclick="confirm()">CONFIRM</button>
+<div id="controls">
+  <input id="tower" placeholder="Tower ID (A/B/C)">
+  <div id="status">Compass initializing… move phone slowly</div>
+  <button onclick="calibrate()">CALIBRATE NORTH</button>
+  <button onclick="send()">CONFIRM</button>
 </div>
 
 <script>
-let heading = 0;
-const tower_id = prompt("Tower ID (A/B/C):");
+const BACKEND = "https://fire-mvp-backend.onrender.com";
 
-navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}})
-.then(s => cam.srcObject = s);
+let lat = null;
+let lon = null;
+let rawHeading = null;
+let heading = null;
+let offset = 0;
 
-window.addEventListener("deviceorientation", e => {
-  if (e.webkitCompassHeading !== undefined)
-    heading = e.webkitCompassHeading;
-  else if (e.alpha !== null)
-    heading = e.alpha;
+// CAMERA
+navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }})
+.then(stream => video.srcObject = stream);
 
-  document.getElementById("heading").innerText =
-    "Heading: " + heading.toFixed(1);
+// LOCATION
+navigator.geolocation.watchPosition(p => {
+  lat = p.coords.latitude;
+  lon = p.coords.longitude;
 });
 
-function confirm(){
-  navigator.geolocation.getCurrentPosition(p=>{
-    fetch("https://fire-mvp-backend.onrender.com/report",{
-      method:"POST",
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        tower_id,
-        lat:p.coords.latitude,
-        lon:p.coords.longitude,
-        bearing:heading
-      })
-    });
-    alert("Sent");
+// COMPASS
+function handleOrientation(e){
+  if (e.webkitCompassHeading !== undefined) {
+    rawHeading = e.webkitCompassHeading;
+  } else if (e.alpha !== null) {
+    rawHeading = 360 - e.alpha;
+  }
+
+  if (rawHeading !== null) {
+    heading = (rawHeading + offset + 360) % 360;
+    status.innerText = "Heading: " + heading.toFixed(1) + "°";
+  }
+}
+
+// iOS permission
+if (typeof DeviceOrientationEvent?.requestPermission === "function") {
+  DeviceOrientationEvent.requestPermission().then(p => {
+    if (p === "granted")
+      window.addEventListener("deviceorientation", handleOrientation);
   });
+} else {
+  window.addEventListener("deviceorientationabsolute", handleOrientation);
+  window.addEventListener("deviceorientation", handleOrientation);
+}
+
+function calibrate(){
+  if (rawHeading === null) {
+    alert("Compass not ready");
+    return;
+  }
+  offset = (360 - rawHeading) % 360;
+  alert("Calibrated. Now point at smoke.");
+}
+
+function send(){
+  if (lat === null || lon === null || heading === null) {
+    alert("Sensors not ready");
+    return;
+  }
+
+  fetch(BACKEND + "/report", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      tower: tower.value || "X",
+      lat, lon, bearing: heading
+    })
+  });
+
+  status.innerText = "Sent ✓";
 }
 </script>
 
