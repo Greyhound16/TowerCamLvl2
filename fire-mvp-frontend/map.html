@@ -1,83 +1,80 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="utf-8">
-<title>Fire Triangulation Map</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-
-<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
-<style>#map{height:100vh;}</style>
+  <title>Fire Detection Map</title>
+  <link rel="stylesheet"
+    href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+  <style>#map{height:95vh}</style>
 </head>
-
 <body>
+<h3>Fire Triangulation MVP</h3>
 <div id="map"></div>
+
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script>
-const BACKEND = "https://fire-mvp-backend.onrender.com";
-const map = L.map("map").setView([15.5,120.6],12);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+const SERVER = "https://fire-mvp-backend.onrender.com";
 
-let layers=[], firePin=null;
+const map = L.map("map").setView([14.6,121.0],13);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png")
+.addTo(map);
 
-function toRad(d){return d*Math.PI/180;}
-function dest(lat,lon,bearing){
-  const R=6371;
-  const d=2;
-  const b=toRad(bearing);
-  const lat1=toRad(lat), lon1=toRad(lon);
-  const lat2=Math.asin(Math.sin(lat1)*Math.cos(d/R)+Math.cos(lat1)*Math.sin(d/R)*Math.cos(b));
-  const lon2=lon1+Math.atan2(Math.sin(b)*Math.sin(d/R)*Math.cos(lat1),Math.cos(d/R)-Math.sin(lat1)*Math.sin(lat2));
+let phoneMarkers = [];
+let bearingLines = [];
+let fireMarker;
+
+function clearMap() {
+  phoneMarkers.forEach(m => map.removeLayer(m));
+  bearingLines.forEach(l => map.removeLayer(l));
+  phoneMarkers = [];
+  bearingLines = [];
+}
+
+// Calculate a point along bearing (distance in meters)
+function destination(lat, lon, bearing, dist) {
+  const R = 6371000;
+  const b = bearing * Math.PI / 180;
+  const lat1 = lat * Math.PI / 180;
+  const lon1 = lon * Math.PI / 180;
+
+  const lat2 = Math.asin(
+    Math.sin(lat1)*Math.cos(dist/R) +
+    Math.cos(lat1)*Math.sin(dist/R)*Math.cos(b)
+  );
+
+  const lon2 = lon1 + Math.atan2(
+    Math.sin(b)*Math.sin(dist/R)*Math.cos(lat1),
+    Math.cos(dist/R)-Math.sin(lat1)*Math.sin(lat2)
+  );
+
   return [lat2*180/Math.PI, lon2*180/Math.PI];
 }
 
-function xy(lat,lon){
-  const R=6371e3;
-  return [R*toRad(lon)*Math.cos(toRad(lat)), R*toRad(lat)];
-}
-function inv(x,y){
-  const R=6371e3;
-  return [y/R*180/Math.PI, x/(R*Math.cos(y/R))*180/Math.PI];
-}
+// Refresh map every 3 seconds
+setInterval(async () => {
+  clearMap();
 
-function intersect(a,b){
-  const [x1,y1]=xy(a.lat,a.lon);
-  const [x2,y2]=xy(b.lat,b.lon);
-  const m1=Math.tan(toRad(a.bearing));
-  const m2=Math.tan(toRad(b.bearing));
-  const x=(m1*x1-m2*x2+y2-y1)/(m1-m2);
-  const y=m1*(x-x1)+y1;
-  return inv(x,y);
-}
+  const r = await fetch(SERVER + "/reports");
+  const reports = await r.json();
 
-async function update(){
-  layers.forEach(l=>map.removeLayer(l));
-  layers=[];
-  const data=await (await fetch(BACKEND+"/reports")).json();
-  const keys=Object.keys(data);
+  reports.forEach(rep => {
+    const start = [rep.lat, rep.lon];
+    const end = destination(rep.lat, rep.lon, rep.bearing, 5000);
 
-  keys.forEach(k=>{
-    const d=data[k];
-    const end=dest(d.lat,d.lon,d.bearing);
-    layers.push(L.polyline([[d.lat,d.lon],end],{color:"red"}).addTo(map));
-    layers.push(L.marker([d.lat,d.lon]).addTo(map));
+    phoneMarkers.push(L.marker(start).addTo(map));
+    bearingLines.push(
+      L.polyline([start,end], {dashArray:"5,5"}).addTo(map)
+    );
   });
 
-  if(keys.length>=2){
-    const pts=[];
-    for(let i=0;i<keys.length;i++)
-      for(let j=i+1;j<keys.length;j++)
-        pts.push(intersect(data[keys[i]],data[keys[j]]));
+  const f = await fetch(SERVER + "/latest");
+  const fire = await f.json();
 
-    const lat=pts.reduce((s,p)=>s+p[0],0)/pts.length;
-    const lon=pts.reduce((s,p)=>s+p[1],0)/pts.length;
-
-    if(firePin) map.removeLayer(firePin);
-    firePin=L.marker([lat,lon]).addTo(map);
-    map.setView([lat,lon],14);
+  if (fire.lat) {
+    if (fireMarker) map.removeLayer(fireMarker);
+    fireMarker = L.marker([fire.lat, fire.lon]).addTo(map);
+    map.setView([fire.lat, fire.lon],15);
   }
-}
-
-setInterval(update,1500);
+}, 3000);
 </script>
 </body>
 </html>
